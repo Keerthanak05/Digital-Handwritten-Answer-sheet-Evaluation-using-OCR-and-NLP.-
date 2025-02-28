@@ -1,0 +1,142 @@
+import streamlit as st
+from scripts.preprocessing import preprocess_image
+from scripts.text_extraction import extract_text
+import os
+from difflib import SequenceMatcher
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
+from PIL import Image
+import gc
+
+# Helper Functions
+def load_expected_answers(filepath):
+    """Load expected answers from a file."""
+    with open(filepath, 'r') as file:
+        return file.readlines()
+
+def clean_text(text):
+    """Clean the extracted text to normalize the output (fix common OCR errors)."""
+    corrections = {
+        'hq': 'human intelligence', 'enablinq': 'enabling', 'tecnnologies': 'technologies',
+        'Qssigtants': 'assistants', 'vecnicles': 'vehicles', 'enhancey': 'enhance',
+        'elficiency': 'efficiency', 'inoustries': 'industries', 'tranglorming': 'transforming',
+        'dccision': 'decision', 'makinq': 'making', 'witn': 'with', 'tne': 'the', 
+        '1t': 'It', 'Q': 'A'
+    }
+    for wrong, correct in corrections.items():
+        text = re.sub(rf'\b{wrong}\b', correct, text, flags=re.IGNORECASE)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^\w\s.,]', '', text)
+    return text.strip()
+
+def calculate_score_tfidf(extracted_answer, expected_answer):
+    """Calculate score using TF-IDF and Cosine Similarity."""
+    vectorizer = TfidfVectorizer(max_features=500)  # Limit vocabulary size
+    vectors = vectorizer.fit_transform([extracted_answer, expected_answer])
+    similarity = cosine_similarity(vectors[0:1], vectors[1:2]).flatten()[0]
+    
+    # Adjust score to ensure minimum of 7 for moderately similar answers
+    if similarity > 0.7:
+        return max(7, similarity * 10)  # Scale score to 10
+    elif similarity > 0.5:
+        return similarity * 10 + 2  # Boost moderately similar answers
+    return similarity * 10
+
+def evaluate_handwritten_answers(extracted_text, expected_answers):
+    """Evaluate extracted text against expected answers."""
+    results = []
+    for idx, expected_answer in enumerate(expected_answers):
+        extracted_answer = extracted_text[idx] if isinstance(extracted_text, list) else extracted_text
+        cleaned_extracted_answer = clean_text(extracted_answer)
+        cleaned_expected_answer = clean_text(expected_answer)
+        
+        # Calculate score
+        score = calculate_score_tfidf(cleaned_extracted_answer, cleaned_expected_answer)
+        
+        results.append({
+            'Question': idx + 1,
+            'Extracted Answer': cleaned_extracted_answer,
+            'Expected Answer': cleaned_expected_answer,
+            'Score (out of 10)': round(score, 2),
+        })
+    return results
+
+# Streamlit App
+def main():
+    st.title("Digital Handwritten Answer Sheet Evaluation")
+
+    # Authentication
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.subheader("Login Page")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        login_btn = st.button("Login")
+
+        if login_btn:
+            if username == "admin" and password == "password":
+                st.session_state.authenticated = True
+                st.success("Login successful!")
+            else:
+                st.error("Invalid username or password.")
+        return
+
+    # Admin Dashboard
+    st.sidebar.title("Admin Dashboard")
+    st.sidebar.button("Logout", on_click=lambda: st.session_state.update(authenticated=False))
+
+    st.subheader("Upload Answer Sheets")
+    uploaded_file = st.file_uploader("Upload an Image", type=["jpeg", "jpg", "png"])
+    if uploaded_file is not None:
+        # Save uploaded file temporarily
+        temp_file_path = f"temp_{uploaded_file.name}"
+        with open(temp_file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success("File uploaded successfully.")
+
+        try:
+            # Preprocess the uploaded image
+            pil_image = Image.open(temp_file_path)
+
+            # Resize image to save memory
+            pil_image = pil_image.resize((800, 800)).convert('L')  # Convert to grayscale
+            resized_image_path = "resized_image.jpg"
+            pil_image.save(resized_image_path)
+
+            # Preprocess and extract text
+            preprocessed_image_path = preprocess_image(resized_image_path)
+            extracted_text = extract_text(preprocessed_image_path)
+            st.write("**Extracted Text:**", extracted_text)
+
+            # Load expected answers
+            expected_answers_path = 'data/expected_answers.txt'
+
+            expected_answers = load_expected_answers(expected_answers_path)
+
+            # Evaluate the extracted text
+            results = evaluate_handwritten_answers(extracted_text, expected_answers)
+
+            # Display results
+            for result in results:
+                st.write(f"**Question {result['Question']}:**")
+                st.write(f"- **Extracted Answer:** {result['Extracted Answer']}")
+                st.write(f"- **Expected Answer:** {result['Expected Answer']}")
+                st.write(f"- **Score (out of 10):** {result['Score (out of 10)']}")
+                st.markdown("---")
+
+        finally:
+            # Clean up temporary files
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            if os.path.exists(resized_image_path):
+                os.remove(resized_image_path)
+            gc.collect()  # Trigger garbage collection to free memory
+
+if __name__ == "__main__":
+    main()
+
+
+
