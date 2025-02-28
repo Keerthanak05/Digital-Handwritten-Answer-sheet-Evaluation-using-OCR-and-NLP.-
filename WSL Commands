@@ -1,0 +1,27 @@
+1. Navigate to Your Project Directory
+bash
+cd /path/to/your/project
+
+2. Create a Virtual Environment
+bash
+python3 -m venv venv
+This will create a folder named venv inside your project.
+
+3. Activate the Virtual Environment
+bash
+source venv/bin/activate
+Once activated, you should see (venv) at the beginning of your terminal prompt.
+
+4. Install Required Dependencies
+If you have a requirements.txt file:
+bash
+pip install -r requirements.txt
+Otherwise, you can manually install necessary libraries:
+bash
+
+pip install opencv-python pytesseract numpy pandas flask
+(Modify the package list as per your project needs.)
+
+5. Deactivate the Virtual Environment (When Done)
+bash
+deactivate
